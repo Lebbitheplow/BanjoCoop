@@ -39,7 +39,12 @@ different claims, and only the first one is currently true for the later systems
 
 ### The easy way
 
-Grab the latest release for your platform:
+> **No release has been published yet.** Until the first one is tagged there is nothing to
+> download, and [Building from source](#building-from-source) is the only way in. The rest of this
+> section describes what the downloads will be.
+
+Grab the latest release for your platform from the
+[**Releases page**](https://github.com/Lebbitheplow/BanjoCoop/releases):
 
 | Download | What it is |
 |---|---|
