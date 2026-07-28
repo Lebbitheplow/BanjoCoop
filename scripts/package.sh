@@ -76,7 +76,7 @@ fi
 
 {
     echo "BanjoCoop $VERSION - online multiplayer for Banjo-Kazooie"
-    echo "https://github.com/banjocoop"
+    echo "https://github.com/Lebbitheplow/BanjoCoop"
     echo
     if [ "$BUNDLE" -eq 1 ]; then
         echo "This archive contains BanjoCoop and BanjoRecompiled $BANJORECOMP_VERSION."

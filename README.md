@@ -256,8 +256,8 @@ everything returns 0 when BanjoCoop is absent, so your mod still works without i
 Needs `clang`, `lld`, `cmake`, `ninja`, `python3`, and a C++20 host compiler.
 
 ```bash
-git clone --recursive https://github.com/<owner>/banjocoop.git
-cd banjocoop
+git clone --recursive https://github.com/Lebbitheplow/BanjoCoop.git
+cd BanjoCoop
 scripts/bootstrap.sh     # submodules, RecompModTool, and the BanjoRecompiled runtime
 make                     # the mod (.nrm) and the native transport
 ```
