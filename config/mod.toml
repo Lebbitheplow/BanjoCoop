@@ -1,0 +1,171 @@
+# BanjoCoop mod manifest.
+# NOTE: RecompModTool resolves [inputs] paths relative to THIS FILE's directory, not the CWD.
+# Hence the leading "../" on everything below.
+
+[manifest]
+id = "banjocoop"
+version = "0.0.1"
+display_name = "BanjoCoop"
+description = """
+Online multiplayer for Banjo-Kazooie.
+
+Phase 3: remote players appear as puppets, and the world is shared — notes, jiggies, and
+file/level/map progress flags replicate between players, with the host arbitrating collection so
+the same note cannot be counted twice."""
+short_description = "Online multiplayer for Banjo-Kazooie."
+authors = [ "lebbi" ]
+
+game_id = "bk"
+minimum_recomp_version = "1.0.1"
+
+dependencies = []
+optional_dependencies = []
+
+# The ENet transport. The runtime appends the platform extension (.so/.dll/.dylib) and loads the
+# file from NEXT TO the .nrm, not from inside it. Only functions listed here are resolvable.
+native_libraries = [
+    { name = "banjocoop_net", funcs = [
+        "bcnet_init",
+        "bcnet_host",
+        "bcnet_join",
+        "bcnet_shutdown",
+        "bcnet_pump",
+        "bcnet_status",
+        "bcnet_reject_reason",
+        "bcnet_set_sim",
+        "bcnet_set_save_path",
+        "bcnet_take_host_save",
+        "bcnet_player_name",
+    ] }
+]
+
+[[manifest.config_options]]
+id = "netmode"
+name = "Network Mode"
+description = "Host a session, join one, or stay offline."
+type = "Enum"
+options = [ "Offline", "Host", "Join" ]
+default = "Offline"
+
+[[manifest.config_options]]
+id = "address"
+name = "Host Address"
+description = "Address to connect to when Network Mode is Join."
+type = "String"
+default = "127.0.0.1"
+
+[[manifest.config_options]]
+id = "port"
+name = "Port"
+description = "UDP port to host on or connect to."
+type = "Number"
+min = 1024
+max = 65535
+step = 1
+precision = 0
+percent = false
+default = 34567
+
+[[manifest.config_options]]
+id = "player_name"
+name = "Player Name"
+description = "Name shown to other players."
+type = "String"
+default = "player"
+
+# Network simulation. The plan's verification harness re-runs every phase's exit criteria at 0,
+# 80 and 150 ms, and at 150 ms with 3% loss -- bugs that only appear under latency are the norm in
+# replication code. These are read live, so they can be changed mid-session from the mod menu
+# without restarting either instance. Applied to outgoing packets on this peer only, so setting
+# 150 ms on one side alone already produces an asymmetric, realistic link.
+
+[[manifest.config_options]]
+id = "show_player_list"
+name = "Show Player List"
+description = "A small overlay in the top-right listing everyone in the session and which world they are in."
+type = "Enum"
+options = [ "Off", "On" ]
+default = "On"
+
+[[manifest.config_options]]
+id = "party_mode"
+name = "Party Mode"
+description = "Off for normal co-op. Race: first to where the host stood when the round began. Hide and Seek: the host seeks after a 30 second head start. Host sets this."
+type = "Enum"
+options = [ "Off", "Race", "Hide and Seek" ]
+default = "Off"
+
+[[manifest.config_options]]
+id = "allow_carrying"
+name = "Carry Other Players"
+description = "Press Z next to another player to pick them up, using the game's own carry mechanic. Handy for boosting somebody onto a ledge."
+type = "Enum"
+options = [ "Off", "On" ]
+default = "On"
+
+[[manifest.config_options]]
+id = "revive_near_teammate"
+name = "Respawn Next to a Teammate"
+description = "After dying, reappear beside another player in the same world instead of walking back from the start."
+type = "Enum"
+options = [ "Off", "On" ]
+default = "On"
+
+[[manifest.config_options]]
+id = "show_lobby"
+name = "In-Game Lobby"
+description = "Press D-pad Down while disconnected to host or join without using this menu. D-pad Up opens chat."
+type = "Enum"
+options = [ "Off", "On" ]
+default = "On"
+
+[[manifest.config_options]]
+id = "sim_latency_ms"
+name = "Debug: Simulated Latency (ms)"
+description = "Artificial one-way delay on outgoing packets. 0 disables."
+type = "Number"
+min = 0
+max = 500
+step = 10
+precision = 0
+percent = false
+default = 0
+
+[[manifest.config_options]]
+id = "sim_jitter_ms"
+name = "Debug: Simulated Jitter (ms)"
+description = "Random variation applied either side of the simulated latency."
+type = "Number"
+min = 0
+max = 200
+step = 5
+precision = 0
+percent = false
+default = 0
+
+[[manifest.config_options]]
+id = "sim_loss_permille"
+name = "Debug: Simulated Packet Loss (per mille)"
+description = "Outgoing packets dropped, in tenths of a percent. 30 = 3%."
+type = "Number"
+min = 0
+max = 300
+step = 5
+precision = 0
+percent = false
+default = 0
+
+[[manifest.config_options]]
+id = "enemy_sync"
+name = "Sync Enemies"
+description = "Share enemies between players, so you can gang up on the same enemy and see each other's kills. Covers common enemy types; turn off if any of them misbehave."
+type = "Enum"
+options = [ "Off", "On" ]
+default = "On"
+
+[inputs]
+elf_path = "../build/mod.elf"
+mod_filename = "banjocoop"
+func_reference_syms_file = "../vendor/BKRecompModTemplate/BanjoRecompSyms/bk.us.rev0.syms.toml"
+data_reference_syms_files = [ "../vendor/BKRecompModTemplate/BanjoRecompSyms/bk.us.rev0.datasyms.toml" ]
+additional_files = []

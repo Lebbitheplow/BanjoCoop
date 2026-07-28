@@ -1,0 +1,21 @@
+[submodule "vendor/enet"]
+	path = vendor/enet
+	url = https://github.com/lsalzman/enet.git
+[submodule "vendor/BanjoRecomp"]
+	path = vendor/BanjoRecomp
+	url = https://github.com/BanjoRecomp/BanjoRecomp.git
+[submodule "vendor/BanjoRecompSyms"]
+	path = vendor/BanjoRecompSyms
+	url = https://github.com/BanjoRecomp/BanjoRecompSyms.git
+[submodule "vendor/BKRecompModTemplate"]
+	path = vendor/BKRecompModTemplate
+	url = https://github.com/BanjoRecomp/BKRecompModTemplate.git
+[submodule "vendor/bk_rom_compressor"]
+	path = vendor/bk_rom_compressor
+	url = https://github.com/MittenzHugg/bk_rom_compressor.git
+[submodule "vendor/N64ModernRuntime"]
+	path = vendor/N64ModernRuntime
+	url = https://github.com/N64Recomp/N64ModernRuntime.git
+[submodule "vendor/N64Recomp"]
+	path = vendor/N64Recomp
+	url = https://github.com/N64Recomp/N64Recomp.git
