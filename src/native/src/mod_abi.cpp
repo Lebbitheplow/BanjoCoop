@@ -63,17 +63,35 @@ std::string read_mips_string(uint8_t* rdram, PTR(char) addr, size_t max_len = 12
 
 } // namespace
 
+/* Mark a symbol as part of the library's public ABI.
+ *
+ * Needed because the two platforms default in opposite directions. An ELF shared object exports
+ * every symbol with default visibility, so on Linux this is a formality. A Windows DLL exports
+ * *nothing* without __declspec(dllexport) or a .def file — and the failure is silent in the worst
+ * way: the DLL builds, links, and packages, then the runtime cannot resolve a single name in it.
+ *
+ * Note also what this does NOT catch: bcnet_test links bcnet_core statically, so the transport
+ * tests pass regardless of whether any of this is exported. A green test run is not evidence that
+ * the library is loadable — only the export table is.
+ */
+#if defined(_WIN32)
+#define BCNET_ABI __declspec(dllexport)
+#else
+#define BCNET_ABI __attribute__((visibility("default")))
+#endif
+
 extern "C" {
 
-/* Checked by the runtime before any export is resolved. Must be 1. */
-uint32_t recomp_api_version = 1;
+/* Checked by the runtime before any export is resolved. Must be 1.
+ * Exported like the functions: if this cannot be found the library is rejected outright. */
+BCNET_ABI uint32_t recomp_api_version = 1;
 
 /* bcnet_init(u32 mod_version, PTR(char) player_name, PTR(u8) rom_hash) -> u32 ok
  *
  * Identity is supplied by the mod rather than discovered here so that the native library stays
  * free of game knowledge and remains unit-testable headless.
  */
-void bcnet_init(uint8_t* rdram, recomp_context* ctx) {
+BCNET_ABI void bcnet_init(uint8_t* rdram, recomp_context* ctx) {
     uint32_t mod_version = _arg<0, uint32_t>(rdram, ctx);
     PTR(char) name_ptr = _arg<1, PTR(char)>(rdram, ctx);
     PTR(char) hash_ptr = _arg<2, PTR(char)>(rdram, ctx);
@@ -110,7 +128,7 @@ void bcnet_init(uint8_t* rdram, recomp_context* ctx) {
 }
 
 /* bcnet_host(u32 port) -> u32 ok */
-void bcnet_host(uint8_t* rdram, recomp_context* ctx) {
+BCNET_ABI void bcnet_host(uint8_t* rdram, recomp_context* ctx) {
     uint32_t port = _arg<0, uint32_t>(rdram, ctx);
     std::string err;
     bool ok = transport().host(static_cast<uint16_t>(port), g_identity, err);
@@ -122,7 +140,7 @@ void bcnet_host(uint8_t* rdram, recomp_context* ctx) {
 }
 
 /* bcnet_join(PTR(char) address, u32 port) -> u32 ok */
-void bcnet_join(uint8_t* rdram, recomp_context* ctx) {
+BCNET_ABI void bcnet_join(uint8_t* rdram, recomp_context* ctx) {
     PTR(char) addr_ptr = _arg<0, PTR(char)>(rdram, ctx);
     uint32_t port = _arg<1, uint32_t>(rdram, ctx);
 
@@ -145,7 +163,7 @@ void bcnet_join(uint8_t* rdram, recomp_context* ctx) {
 }
 
 /* bcnet_shutdown() */
-void bcnet_shutdown(uint8_t* rdram, recomp_context* ctx) {
+BCNET_ABI void bcnet_shutdown(uint8_t* rdram, recomp_context* ctx) {
     (void)rdram;
     (void)ctx;
     if (g_transport) {
@@ -162,7 +180,7 @@ void bcnet_shutdown(uint8_t* rdram, recomp_context* ctx) {
  * All three structs are all-4-byte-field, so they can be accessed through TO_PTR as ordinary
  * native structs: rdram stores 32-bit words natively and nothing here straddles a word boundary.
  */
-void bcnet_pump(uint8_t* rdram, recomp_context* ctx) {
+BCNET_ABI void bcnet_pump(uint8_t* rdram, recomp_context* ctx) {
     PTR(void) local_ptr = _arg<0, PTR(void)>(rdram, ctx);
     PTR(void) outgoing_ptr = _arg<1, PTR(void)>(rdram, ctx);
     PTR(void) incoming_ptr = _arg<2, PTR(void)>(rdram, ctx);
@@ -201,7 +219,7 @@ void bcnet_pump(uint8_t* rdram, recomp_context* ctx) {
  *
  * Only the game knows where its save lives (recomp_get_save_file_path), and only the native side
  * can read or write a file, so the path has to cross the boundary. */
-void bcnet_set_save_path(uint8_t* rdram, recomp_context* ctx) {
+BCNET_ABI void bcnet_set_save_path(uint8_t* rdram, recomp_context* ctx) {
     PTR(char) path_ptr = _arg<0, PTR(char)>(rdram, ctx);
     std::string path = read_mips_string(rdram, path_ptr, 512);
     transport().set_save_path(path);
@@ -214,7 +232,7 @@ void bcnet_set_save_path(uint8_t* rdram, recomp_context* ctx) {
  * Non-zero once the host's save has been written locally; the mod then hands the name to
  * recomp_change_save_file. Returned as a string because that is what the runtime wants, and
  * written a byte at a time because rdram's layout makes anything else wrong (see protocol.h). */
-void bcnet_take_host_save(uint8_t* rdram, recomp_context* ctx) {
+BCNET_ABI void bcnet_take_host_save(uint8_t* rdram, recomp_context* ctx) {
     PTR(char) out_ptr = _arg<0, PTR(char)>(rdram, ctx);
     uint32_t max = _arg<1, uint32_t>(rdram, ctx);
 
@@ -239,7 +257,7 @@ void bcnet_take_host_save(uint8_t* rdram, recomp_context* ctx) {
  * Written a byte at a time through MEM_B, which applies the ^3 swizzle rdram needs. A plain
  * struct copy would produce scrambled text (docs/symbols.md §11), which is why names are fetched
  * here rather than carried in bc_incoming with everything else. */
-void bcnet_player_name(uint8_t* rdram, recomp_context* ctx) {
+BCNET_ABI void bcnet_player_name(uint8_t* rdram, recomp_context* ctx) {
     uint32_t player_id = _arg<0, uint32_t>(rdram, ctx);
     PTR(char) out_ptr = _arg<1, PTR(char)>(rdram, ctx);
     uint32_t max = _arg<2, uint32_t>(rdram, ctx);
@@ -261,7 +279,7 @@ void bcnet_player_name(uint8_t* rdram, recomp_context* ctx) {
 }
 
 /* bcnet_status() -> u32 (bcnet::Status) */
-void bcnet_status(uint8_t* rdram, recomp_context* ctx) {
+BCNET_ABI void bcnet_status(uint8_t* rdram, recomp_context* ctx) {
     (void)rdram;
     uint32_t st = g_transport ? static_cast<uint32_t>(g_transport->status())
                               : static_cast<uint32_t>(Status::Offline);
@@ -269,7 +287,7 @@ void bcnet_status(uint8_t* rdram, recomp_context* ctx) {
 }
 
 /* bcnet_reject_reason() -> u32 (BCNET_REJECT_*) */
-void bcnet_reject_reason(uint8_t* rdram, recomp_context* ctx) {
+BCNET_ABI void bcnet_reject_reason(uint8_t* rdram, recomp_context* ctx) {
     (void)rdram;
     _return<uint32_t>(ctx, g_transport ? g_transport->reject_reason() : 0u);
 }
@@ -279,7 +297,7 @@ void bcnet_reject_reason(uint8_t* rdram, recomp_context* ctx) {
  * Loss is per-mille rather than a float because passing floats across this boundary is fiddlier
  * than it is worth for a debug control.
  */
-void bcnet_set_sim(uint8_t* rdram, recomp_context* ctx) {
+BCNET_ABI void bcnet_set_sim(uint8_t* rdram, recomp_context* ctx) {
     NetSimConfig cfg;
     cfg.latency_ms = _arg<0, uint32_t>(rdram, ctx);
     cfg.jitter_ms = _arg<1, uint32_t>(rdram, ctx);

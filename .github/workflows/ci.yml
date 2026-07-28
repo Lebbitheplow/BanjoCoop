@@ -42,6 +42,9 @@ jobs:
       - name: Verify imports resolve against the shipped runtime
         run: make check-imports
 
+      - name: Verify the native library exports its ABI
+        run: make check-exports
+
       - name: Transport tests
         run: make test-native
 
@@ -88,6 +91,35 @@ jobs:
           if (-not $dll) { throw "banjocoop_net.dll was not built" }
           New-Item -ItemType Directory -Path dist-dll -Force | Out-Null
           Copy-Item $dll.FullName dist-dll/
+
+      # The check that was missing, and that let a completely unusable DLL ship in v0.1.0.
+      #
+      # A Windows DLL exports nothing without __declspec(dllexport), and none of the other steps
+      # notice: the DLL builds and links, and bcnet_test passes because it links bcnet_core
+      # *statically* and never touches the export table. The runtime, which resolves every one of
+      # these names dynamically, then finds nothing at all.
+      #
+      # Verified by name presence rather than by parsing the export directory — dumpbin needs a
+      # developer prompt. It is a smoke test, not a rigorous parse, but it distinguishes precisely
+      # the failure that occurred: with no exports the names are absent from the binary entirely.
+      - name: Verify the DLL exports its ABI
+        shell: pwsh
+        run: |
+          $required = @(
+            'recomp_api_version',
+            'bcnet_init','bcnet_host','bcnet_join','bcnet_shutdown','bcnet_pump',
+            'bcnet_status','bcnet_reject_reason','bcnet_set_sim','bcnet_set_save_path',
+            'bcnet_take_host_save','bcnet_player_name'
+          )
+          $bytes = [System.IO.File]::ReadAllBytes('dist-dll/banjocoop_net.dll')
+          $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
+          $missing = @($required | Where-Object { -not $text.Contains($_) })
+          if ($missing.Count -gt 0) {
+            Write-Host "MISSING from the DLL's exports:"
+            $missing | ForEach-Object { Write-Host "  $_" }
+            throw "banjocoop_net.dll does not export its ABI - the runtime could not load it"
+          }
+          Write-Host "all $($required.Count) ABI symbols present"
 
       - uses: actions/upload-artifact@v4
         with:

@@ -273,6 +273,7 @@ Cloned without `--recursive`? `git submodule update --init --recursive`.
 |---|---|
 | `make` | Build the mod and the native library |
 | `make check-imports` | Verify every base-recomp import resolves against the shipped runtime — **run this before trusting a build** |
+| `make check-exports` | Verify the native library exports the ABI the runtime resolves by name |
 | `make test-native` | Headless transport tests: real peers, real sockets, no ROM and no game |
 | `make test-modlogic` | Mod logic compiled against fake game accessors |
 | `make install` | Copy both artifacts into your BanjoRecompiled mods folder |

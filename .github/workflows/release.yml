@@ -44,6 +44,28 @@ jobs:
           New-Item -ItemType Directory -Path out -Force | Out-Null
           Copy-Item $dll.FullName out/
 
+      # v0.1.0 shipped a DLL with an empty export table. Nothing else here notices: it builds, it
+      # links, and bcnet_test passes because it links bcnet_core statically. Never release without
+      # this check.
+      - name: Verify the DLL exports its ABI
+        shell: pwsh
+        run: |
+          $required = @(
+            'recomp_api_version',
+            'bcnet_init','bcnet_host','bcnet_join','bcnet_shutdown','bcnet_pump',
+            'bcnet_status','bcnet_reject_reason','bcnet_set_sim','bcnet_set_save_path',
+            'bcnet_take_host_save','bcnet_player_name'
+          )
+          $bytes = [System.IO.File]::ReadAllBytes('out/banjocoop_net.dll')
+          $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
+          $missing = @($required | Where-Object { -not $text.Contains($_) })
+          if ($missing.Count -gt 0) {
+            Write-Host "MISSING from the DLL's exports:"
+            $missing | ForEach-Object { Write-Host "  $_" }
+            throw "banjocoop_net.dll does not export its ABI - the runtime could not load it"
+          }
+          Write-Host "all $($required.Count) ABI symbols present"
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows-dll
@@ -72,6 +94,9 @@ jobs:
 
       - name: Verify imports resolve against the shipped runtime
         run: make check-imports
+
+      - name: Verify the native library exports its ABI
+        run: make check-exports
 
       - name: Tests
         run: |

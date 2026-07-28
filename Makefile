@@ -187,6 +187,27 @@ debug-p2: install-p2
 #
 # This compares what the built mod actually imports from the base recomp against what the runtime
 # we ship alongside can provide. Run it before trusting a build.
+# Does the native library actually export the ABI the runtime resolves by name?
+#
+# Separate from check-imports, which validates the other direction (the mod's imports against the
+# runtime). Nothing else catches this: the library builds, links and packages, and the transport
+# tests pass regardless, because bcnet_test links bcnet_core statically and never goes near the
+# export table. A v0.1.0 Windows DLL shipped with an empty one.
+check-exports: native
+	@missing=0; \
+	for sym in recomp_api_version bcnet_init bcnet_host bcnet_join bcnet_shutdown bcnet_pump \
+	           bcnet_status bcnet_reject_reason bcnet_set_sim bcnet_set_save_path \
+	           bcnet_take_host_save bcnet_player_name; do \
+		if nm -D --defined-only $(NATIVE_LIB) 2>/dev/null | grep -qE " $$sym$$"; then \
+			echo "  ok      $$sym"; \
+		else \
+			echo "  MISSING $$sym"; missing=1; \
+		fi; \
+	done; \
+	if [ $$missing -ne 0 ]; then \
+		echo "*** the runtime cannot resolve every export - the mod will load but do nothing ***"; exit 1; \
+	fi
+
 check-imports: $(TARGET)
 	@sec=$$(readelf -W -S $(TARGET) | grep -oE '^ *\[ *[0-9]+\] \.recomp_import\.\*' | grep -oE '[0-9]+' | head -1); \
 	if [ -z "$$sec" ]; then echo "no base-recomp imports"; exit 0; fi; \
