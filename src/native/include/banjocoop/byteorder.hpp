@@ -23,8 +23,19 @@ inline constexpr bool host_is_big_endian = true;
 inline constexpr bool host_is_big_endian = false;
 #endif
 
-inline uint32_t swap_wire_u32(uint32_t v) {
-    return host_is_big_endian ? v : __builtin_bswap32(v);
+/* Written out by hand rather than with __builtin_bswap32, which is a GCC/Clang extension MSVC
+ * does not have — it has _byteswap_ulong instead, behind <intrin.h>. Branching on the compiler
+ * would mean a third branch the next time somebody builds this somewhere new.
+ *
+ * This costs nothing: every compiler recognises the pattern and emits a single bswap (x86) or rev
+ * (ARM). It is also constexpr, which no intrinsic here is. */
+inline constexpr uint32_t byteswap32(uint32_t v) {
+    return ((v & 0x000000FFu) << 24) | ((v & 0x0000FF00u) << 8) |
+           ((v & 0x00FF0000u) >> 8) | ((v & 0xFF000000u) >> 24);
+}
+
+inline constexpr uint32_t swap_wire_u32(uint32_t v) {
+    return host_is_big_endian ? v : byteswap32(v);
 }
 
 /* host -> wire and wire -> host are the same operation; named separately for readability at
