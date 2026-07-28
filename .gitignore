@@ -1,0 +1,44 @@
+# --- ROMs and saves --------------------------------------------------------------------------
+#
+# First, because it is the only rule here that cannot be fixed later. A ROM committed once stays
+# in the history after it is deleted, and only rewriting history removes it.
+#
+# BanjoCoop never ships, downloads or contains a ROM. Players supply their own to BanjoRecompiled,
+# which copies it into its own config folder — and on this machine that copy lives under run/,
+# which is ignored below. These patterns are the second line of defence for one dropped anywhere
+# else in the tree.
+*.z64
+*.n64
+*.v64
+*.rom
+*.sra
+*.eep
+*.mpk
+*.bin
+
+# --- build output ----------------------------------------------------------------------------
+build/
+build-native/
+dist/
+
+# --- fetched or built by scripts/bootstrap.sh --------------------------------------------------
+#
+# The BanjoRecompiled release (21 MB, GPL-3, not ours to keep in this history) and RecompModTool,
+# which is built from the vendor/N64Recomp submodule. Both are reproducible, so neither belongs
+# in the repo.
+runtime/
+tools/RecompModTool
+
+# --- play-test state ---------------------------------------------------------------------------
+#
+# Logs, save snapshots, and the whole second game instance — which contains an imported ROM and
+# save files. Everything here is the product of playing the game, not of building it.
+run/
+
+# --- editor / OS -------------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
