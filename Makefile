@@ -238,8 +238,14 @@ test-modlogic: | $(BUILD_DIR)
 		-o $(BUILD_DIR)/test_tiers
 	@$(BUILD_DIR)/test_tiers
 
+# Release archives, into dist/. The Windows ones need banjocoop_net.dll in build-native/, which
+# only CI produces — see .github/workflows/release.yml. Locally this makes the Linux pair.
+package: all
+	@./scripts/package.sh linux
+	@./scripts/package.sh linux --bundle
+
 clean:
-	rm -rf $(BUILD_DIR) $(NATIVE_BUILD)
+	rm -rf $(BUILD_DIR) $(NATIVE_BUILD) dist
 
 -include $(C_DEPS)
 

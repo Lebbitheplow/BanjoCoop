@@ -4,7 +4,7 @@
 
 [manifest]
 id = "banjocoop"
-version = "0.0.1"
+version = "0.1.0"
 display_name = "BanjoCoop"
 description = """
 Online multiplayer for Banjo-Kazooie.

@@ -1,0 +1,126 @@
+# Build the downloadable archives and attach them to a tagged release.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Four archives: bundle and mod-only, for Linux and Windows. The bundle includes BanjoRecompiled
+# itself (GPL-3, unmodified, fetched from upstream at the version pinned in scripts/versions.sh —
+# see NOTICE.md). No archive contains a ROM, and nothing here downloads one.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-dll:
+    name: Build the Windows transport
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - run: cmake -S src/native -B build-native -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build-native --config Release
+
+      # Tested before it ships. A DLL that builds but does not work is worse than no DLL,
+      # because somebody will spend an evening blaming their router.
+      - name: Transport tests
+        run: |
+          $exe = Get-ChildItem -Path build-native -Filter bcnet_test.exe -Recurse | Select-Object -First 1
+          if (-not $exe) { throw "bcnet_test.exe was not built" }
+          & $exe.FullName
+          if ($LASTEXITCODE -ne 0) { throw "transport tests failed" }
+
+      - name: Collect
+        run: |
+          $dll = Get-ChildItem -Path build-native -Filter banjocoop_net.dll -Recurse | Select-Object -First 1
+          if (-not $dll) { throw "banjocoop_net.dll was not built" }
+          New-Item -ItemType Directory -Path out -Force | Out-Null
+          Copy-Item $dll.FullName out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-dll
+          path: out/banjocoop_net.dll
+          if-no-files-found: error
+
+  package:
+    name: Assemble and publish
+    needs: windows-dll
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld cmake ninja-build python3 unzip zip
+
+      - name: Bootstrap
+        run: ./scripts/bootstrap.sh
+
+      - name: Build the mod and the Linux transport
+        run: make
+
+      - name: Verify imports resolve against the shipped runtime
+        run: make check-imports
+
+      - name: Tests
+        run: |
+          make test-native
+          make test-modlogic
+
+      # The .nrm built above is byte-identical on every platform; only the transport differs,
+      # so the Windows DLL just drops in beside it.
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-dll
+          path: build-native
+
+      - name: Package
+        run: |
+          ./scripts/package.sh linux
+          ./scripts/package.sh linux --bundle
+          ./scripts/package.sh windows
+          ./scripts/package.sh windows --bundle
+          ls -lh dist/*.zip
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
+          body: |
+            ## Which download?
+
+            | | |
+            |---|---|
+            | **`...-bundle.zip`** | BanjoRecompiled and BanjoCoop together. Start here. |
+            | **`...-mod-only.zip`** | Just the mod, if you already run BanjoRecompiled. |
+
+            Unzip, run `install.sh` (Linux) or `install.ps1` (Windows), then launch
+            BanjoRecompiled.
+
+            ### You need your own copy of Banjo-Kazooie
+
+            No game data is included in these archives or downloaded by anything in them.
+            BanjoRecompiled asks where your ROM is on first run. Only the North American
+            v1.0 (NTSC-U rev0) release works — if yours is rejected, run
+            `./install.sh --check-rom <your-rom>` and it will tell you why.
+
+            ### Status
+
+            Two players in a world, shared progress, and free-roam are played and work.
+            Enemies, bosses, projectiles, revive, carrying and party modes are built and
+            tested off-game but barely played — reports on those are the point of this build.
+
+            BanjoCoop is GPL-3.0-or-later. The bundles include BanjoRecompiled (GPL-3,
+            unmodified); see `NOTICE.md`. Unaffiliated with Nintendo, Rare, or BanjoRecomp.

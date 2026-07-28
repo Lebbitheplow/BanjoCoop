@@ -1,0 +1,96 @@
+# Build and test on every push.
+#
+# docs/next.md called the absence of CI "the cheapest large win available" — with no repository,
+# nothing was bisectable and nothing was verified except on one developer's machine.
+#
+# Both test suites run headless with no ROM and no game, which is the only reason any of this is
+# possible: the transport tests talk over loopback between two Transport objects in one process,
+# and the mod-logic tests compile the real mod sources against fake game accessors.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux — mod, transport, and imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld cmake ninja-build python3 unzip
+
+      - name: Bootstrap
+        # The runtime is fetched here rather than skipped: check-imports compares the built mod's
+        # imports against what the shipped runtime can actually resolve, and that check is the one
+        # that catches code written against vendor/BanjoRecomp's `main` instead of release 1.0.1
+        # (docs/symbols.md §16). Skipping it would leave the most valuable check unrun.
+        run: ./scripts/bootstrap.sh
+
+      - name: Build mod and native transport
+        run: make
+
+      - name: Verify imports resolve against the shipped runtime
+        run: make check-imports
+
+      - name: Transport tests
+        run: make test-native
+
+      - name: Mod logic tests
+        run: make test-modlogic
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            build/banjocoop.nrm
+            build-native/banjocoop_net.so
+          if-no-files-found: error
+
+  windows:
+    name: Windows — transport
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Only the native transport is built here. The .nrm is MIPS code and byte-identical
+      # everywhere, so the Linux job is the one that produces it.
+      #
+      # The transport is portable by construction — standard C++ plus ENet, which ships its own
+      # win32 backend and links ws2_32/winmm itself.
+      - name: Configure
+        run: cmake -S src/native -B build-native -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build-native --config Release
+
+      - name: Transport tests
+        run: |
+          $exe = Get-ChildItem -Path build-native -Filter bcnet_test.exe -Recurse | Select-Object -First 1
+          if (-not $exe) { throw "bcnet_test.exe was not built" }
+          & $exe.FullName
+          if ($LASTEXITCODE -ne 0) { throw "transport tests failed" }
+
+      - name: Collect the DLL
+        run: |
+          $dll = Get-ChildItem -Path build-native -Filter banjocoop_net.dll -Recurse | Select-Object -First 1
+          if (-not $dll) { throw "banjocoop_net.dll was not built" }
+          New-Item -ItemType Directory -Path dist-dll -Force | Out-Null
+          Copy-Item $dll.FullName dist-dll/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: dist-dll/banjocoop_net.dll
+          if-no-files-found: error

@@ -11,8 +11,6 @@
 #include <thread>
 #include <vector>
 
-#include <unistd.h>
-
 #include "banjocoop/byteorder.hpp"
 #include "banjocoop/transport.hpp"
 
