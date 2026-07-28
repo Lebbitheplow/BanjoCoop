@@ -7,6 +7,15 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../vendor")
 
+# Warning flags, per compiler. MSVC rejects -Wall/-Wextra outright ("invalid numeric argument
+# '/Wextra'") and never gets as far as compiling anything, so these cannot be spelled once.
+# /W4 is MSVC's rough equivalent of -Wall -Wextra.
+if(MSVC)
+    set(BCNET_WARNINGS /W4)
+else()
+    set(BCNET_WARNINGS -Wall -Wextra)
+endif()
+
 # ENet ships its own CMake project. Vendored rather than system-installed so the .so we ship
 # alongside the mod does not depend on whatever libenet the user happens to have.
 add_subdirectory("${VENDOR_DIR}/enet" enet EXCLUDE_FROM_ALL)
@@ -23,7 +32,7 @@ target_include_directories(bcnet_core PUBLIC
     "${VENDOR_DIR}/enet/include"
 )
 target_link_libraries(bcnet_core PUBLIC enet)
-target_compile_options(bcnet_core PRIVATE -Wall -Wextra)
+target_compile_options(bcnet_core PRIVATE ${BCNET_WARNINGS})
 
 find_package(Threads REQUIRED)
 target_link_libraries(bcnet_core PUBLIC Threads::Threads)
@@ -39,12 +48,12 @@ target_include_directories(banjocoop_net PRIVATE
 )
 # The runtime resolves exports via dlsym by exact name, so nothing may be hidden or renamed.
 set_target_properties(banjocoop_net PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET default)
-target_compile_options(banjocoop_net PRIVATE -Wall -Wextra)
+target_compile_options(banjocoop_net PRIVATE ${BCNET_WARNINGS})
 
 # Headless transport test: two Transports in one process, no game involved.
 add_executable(bcnet_test tests/test_transport.cpp)
 target_link_libraries(bcnet_test PRIVATE bcnet_core)
-target_compile_options(bcnet_test PRIVATE -Wall -Wextra)
+target_compile_options(bcnet_test PRIVATE ${BCNET_WARNINGS})
 
 enable_testing()
 add_test(NAME transport COMMAND bcnet_test)
