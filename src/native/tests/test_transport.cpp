@@ -901,6 +901,92 @@ void test_chat_reaches_everyone() {
     host.shutdown();
 }
 
+/* The WebSocket backend must carry everything the ENet one does — it shares all the routing logic
+ * and differs only in the bytes underneath. Rather than re-run the whole suite twice, this
+ * exercises the load-bearing paths over ws://loopback: connect, bidirectional state relay through
+ * the host, and a reliable world event both ways. If the Link abstraction is sound, these pass for
+ * exactly the same reasons the ENet versions do. */
+void test_ws_connect_state_and_events() {
+    std::printf("test: websocket backend carries state and events\n");
+
+    Transport host, a, b;
+    std::string err;
+    uint16_t port = pick_port();
+    std::string url = "ws://127.0.0.1:" + std::to_string(port);
+
+    check(host.host_ws(port, make_identity("host"), err), "ws host binds");
+    check(a.join_ws(url, make_identity("alice"), err), "alice connects over ws");
+    check(wait_for([&] { return a.status() == Status::Connected; }), "alice reaches Connected");
+    check(b.join_ws(url, make_identity("bob"), err), "bob connects over ws");
+    check(wait_for([&] { return b.status() == Status::Connected; }), "bob reaches Connected");
+
+    check(a.local_player_id() == 1, "alice is player 1");
+    check(b.local_player_id() == 2, "bob is player 2");
+
+    host.set_local_state(build_state(0.0f, 0.0f, 0.0f, 5));
+    a.set_local_state(build_state(11.0f, 12.0f, 13.0f, 5));
+    b.set_local_state(build_state(21.0f, 22.0f, 23.0f, 5));
+
+    /* Bob sees Alice's state, which can only have reached him relayed through the host. */
+    check(wait_for([&] {
+              bc_incoming s{};
+              b.snapshot(s);
+              for (uint32_t i = 0; i < s.remote_count; i++) {
+                  if (s.remotes[i].player_id == 1 && s.remotes[i].state.pos[0] == 11.0f) {
+                      return true;
+                  }
+              }
+              return false;
+          }),
+          "bob receives alice's state via the host, over ws");
+
+    check(wait_for([&] {
+              bc_incoming s{};
+              b.snapshot(s);
+              return s.remote_count == 2;
+          }),
+          "bob sees both host and alice");
+
+    /* Reliable event channel, client -> host, attributed by the host from the connection. */
+    a.submit_events(one_event(BC_EV_JIGGY, 5, 1, 0x0A, 1));
+    std::vector<bc_event> at_host;
+    collect_events(host, at_host);
+    check(count_kind(at_host, BC_EV_JIGGY) == 1, "host receives alice's jiggy event once, over ws");
+    if (count_kind(at_host, BC_EV_JIGGY) == 1) {
+        check(at_host[0].origin == 1u, "the ws event is attributed to alice");
+    }
+
+    /* And host -> clients. */
+    host.submit_events(one_event(BC_EV_FLAG_FILEPROG, 5, 1, 0x2A, 1));
+    std::vector<bc_event> at_bob;
+    collect_events(b, at_bob);
+    check(count_kind(at_bob, BC_EV_FLAG_FILEPROG) == 1, "bob receives the host's flag over ws");
+
+    a.shutdown();
+    b.shutdown();
+    host.shutdown();
+}
+
+/* A ROM/version mismatch must be refused over ws exactly as over enet: the reject travels, then
+ * the host drops the peer. */
+void test_ws_rejects_mismatch() {
+    std::printf("test: websocket backend rejects a bad handshake\n");
+
+    Transport host, client;
+    std::string err;
+    uint16_t port = pick_port();
+    std::string url = "ws://127.0.0.1:" + std::to_string(port);
+
+    check(host.host_ws(port, make_identity("host", 1), err), "ws host binds");
+    check(client.join_ws(url, make_identity("client", 2), err), "client connects over ws");
+
+    check(wait_for([&] { return client.status() == Status::Rejected; }), "client is rejected");
+    check(client.reject_reason() == BCNET_REJECT_MOD_VERSION, "reason is MOD_VERSION");
+
+    client.shutdown();
+    host.shutdown();
+}
+
 } // namespace
 
 int main() {
@@ -921,6 +1007,8 @@ int main() {
     test_host_objects_skip_other_maps();
     test_departure_reaches_other_clients();
     test_chat_reaches_everyone();
+    test_ws_connect_state_and_events();
+    test_ws_rejects_mismatch();
 
     if (g_failures == 0) {
         std::printf("\nall transport tests passed\n");

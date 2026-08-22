@@ -20,18 +20,58 @@ endif()
 # alongside the mod does not depend on whatever libenet the user happens to have.
 add_subdirectory("${VENDOR_DIR}/enet" enet EXCLUDE_FROM_ALL)
 
+# mbedTLS, vendored and built from source, so the WebSocket client can speak wss:// to Cloudflare
+# without depending on a system OpenSSL — the same "ship our own" reasoning as ENet. Programs,
+# tests and fatal warnings off: we only want the three libraries (mbedtls/mbedx509/mbedcrypto).
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+# Use mbedTLS's committed pre-generated PSA driver wrappers rather than regenerating them, so the
+# build needs no Python/jinja2 (GEN_FILES already defaults OFF; set explicitly so a future default
+# flip cannot silently add a build-time Python dependency in CI).
+set(GEN_FILES OFF CACHE BOOL "" FORCE)
+add_subdirectory("${VENDOR_DIR}/mbedtls" mbedtls EXCLUDE_FROM_ALL)
+
+# IXWebSocket, for the WebSocket backend that rides a Cloudflare tunnel. Vendored for the same
+# reason as ENet. TLS on, using the vendored mbedTLS above — we pre-set the variables IXWebSocket
+# would otherwise discover via find_package(MbedTLS), so it uses ours. zlib/deflate is off: the
+# wire is small binary frames, not text worth compressing, and it trims the dependency surface.
+set(USE_ZLIB OFF CACHE BOOL "" FORCE)
+set(IXWEBSOCKET_INSTALL OFF CACHE BOOL "" FORCE)
+set(USE_TLS ON CACHE BOOL "" FORCE)
+set(USE_MBED_TLS ON CACHE BOOL "" FORCE)
+set(MBEDTLS_FOUND TRUE)
+set(MBEDTLS_INCLUDE_DIRS "${VENDOR_DIR}/mbedtls/include")
+set(MBEDTLS_LIBRARIES mbedtls mbedx509 mbedcrypto)
+add_subdirectory("${VENDOR_DIR}/IXWebSocket" ixwebsocket EXCLUDE_FROM_ALL)
+# IXWebSocket only adds this define on the find_package path, which we bypassed; mbedTLS 3.x needs
+# it for IXSocketMbedTLS.cpp to compile against the v3 API.
+target_compile_definitions(ixwebsocket PRIVATE IXWEBSOCKET_USE_MBED_TLS_MIN_VERSION_3)
+
 # Transport core, deliberately free of any game or recomp dependency so it can be unit tested
 # headless with no ROM and no running game.
+# Embed the CA bundle: read the .pem and bake it into a generated source as an in-memory PEM
+# string. Regenerated whenever the .pem changes (its content drives the configure_file output).
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/certs/cacert.pem" BCNET_CA_BUNDLE)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/certs/ca_bundle.cpp.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/ca_bundle.cpp"
+    @ONLY)
+
 add_library(bcnet_core STATIC
     src/transport.cpp
     src/transport_events.cpp
     src/transport_session.cpp
+    src/enet_link.cpp
+    src/ws_link.cpp
+    src/tunnel.cpp
+    "${CMAKE_CURRENT_BINARY_DIR}/ca_bundle.cpp"
 )
 target_include_directories(bcnet_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${VENDOR_DIR}/enet/include"
 )
-target_link_libraries(bcnet_core PUBLIC enet)
+target_link_libraries(bcnet_core PUBLIC enet ixwebsocket ${CMAKE_DL_LIBS})
 target_compile_options(bcnet_core PRIVATE ${BCNET_WARNINGS})
 
 find_package(Threads REQUIRED)

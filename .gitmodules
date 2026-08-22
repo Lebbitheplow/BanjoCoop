@@ -19,3 +19,9 @@
 [submodule "vendor/N64Recomp"]
 	path = vendor/N64Recomp
 	url = https://github.com/N64Recomp/N64Recomp.git
+[submodule "vendor/IXWebSocket"]
+	path = vendor/IXWebSocket
+	url = https://github.com/machinezone/IXWebSocket.git
+[submodule "vendor/mbedtls"]
+	path = vendor/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls.git

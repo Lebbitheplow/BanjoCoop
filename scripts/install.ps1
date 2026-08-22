@@ -132,9 +132,15 @@ New-Item -ItemType Directory -Path $ModsDir -Force | Out-Null
 Copy-Item -Path $Nrm -Destination $ModsDir -Force
 Copy-Item -Path $Lib -Destination $ModsDir -Force
 
+# cloudflared, if it shipped in this archive, goes beside the library so the Cloudflare-tunnel
+# connection mode finds it. Optional: Direct (UDP) play does not need it.
+$Cf = Find-Artifact 'cloudflared.exe'
+if ($Cf) { Copy-Item -Path $Cf -Destination $ModsDir -Force }
+
 Write-Head 'BanjoCoop installed'
 Write-Host "  $ModsDir\banjocoop.nrm"
 Write-Host "  $ModsDir\banjocoop_net.dll"
+if ($Cf) { Write-Host "  $ModsDir\cloudflared.exe  (for the Cloudflare Tunnel connection mode)" }
 Write-Host ''
 Write-Host 'next:'
 Write-Host '  1. run BanjoRecompiled (it asks for your own Banjo-Kazooie ROM, NTSC-U v1.0,'

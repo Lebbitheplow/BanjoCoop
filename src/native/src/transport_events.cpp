@@ -133,14 +133,13 @@ void Transport::send_event_to(const bc_event& ev, uint32_t player_id) {
     }
 
     for (const auto& [peer, id] : impl_->peer_ids) {
-        if (id != player_id || peer->state != ENET_PEER_STATE_CONNECTED) {
+        if (id != player_id) {
             continue;
         }
         Writer w(BCNET_MSG_EVENT);
         write_event(w, ev);
         std::lock_guard<std::mutex> lock(sim_mutex_);
-        sim_.submit(std::move(w.buf), static_cast<uint32_t>(peer - impl_->host->peers),
-                    BCNET_CHANNEL_EVENT, true);
+        sim_.submit(std::move(w.buf), peer, BCNET_CHANNEL_EVENT, true);
         return;
     }
 }
@@ -204,12 +203,11 @@ void Transport::broadcast_objects() {
 
     std::lock_guard<std::mutex> lock(sim_mutex_);
     for (const auto& [peer, id] : impl_->peer_ids) {
-        if (id >= BCNET_MAX_PLAYERS || !wants[id] || peer->state != ENET_PEER_STATE_CONNECTED) {
+        if (id >= BCNET_MAX_PLAYERS || !wants[id]) {
             continue;
         }
         std::vector<uint8_t> copy = w.buf;
-        sim_.submit(std::move(copy), static_cast<uint32_t>(peer - impl_->host->peers),
-                    BCNET_CHANNEL_STATE, false);
+        sim_.submit(std::move(copy), peer, BCNET_CHANNEL_STATE, false);
     }
 }
 
@@ -393,17 +391,13 @@ void Transport::submit_chat(const bc_chat_line& line) {
         accept_chat(local_player_id_.load(std::memory_order_relaxed), line);
         std::lock_guard<std::mutex> lock(sim_mutex_);
         for (const auto& [peer, id] : impl_->peer_ids) {
-            if (peer->state != ENET_PEER_STATE_CONNECTED) {
-                continue;
-            }
             Writer relay(BCNET_MSG_CHAT);
             relay.u32(local_player_id_.load(std::memory_order_relaxed));
             relay.u32(line.length);
             for (uint32_t i = 0; i < BCNET_CHAT_LEN / 4; i++) {
                 relay.u32(line.text[i]);
             }
-            sim_.submit(std::move(relay.buf), static_cast<uint32_t>(peer - impl_->host->peers),
-                        BCNET_CHANNEL_EVENT, true);
+            sim_.submit(std::move(relay.buf), peer, BCNET_CHANNEL_EVENT, true);
         }
         return;
     }
@@ -532,14 +526,10 @@ void Transport::relay_event(const bc_event& ev, uint32_t skip_player_id) {
         if (id == skip_player_id || id >= BCNET_MAX_PLAYERS || !peer_wants[id]) {
             continue;
         }
-        if (peer->state != ENET_PEER_STATE_CONNECTED) {
-            continue;
-        }
         Writer w(BCNET_MSG_EVENT);
         write_event(w, ev);
         std::lock_guard<std::mutex> lock(sim_mutex_);
-        sim_.submit(std::move(w.buf), static_cast<uint32_t>(peer - impl_->host->peers),
-                    BCNET_CHANNEL_EVENT, true);
+        sim_.submit(std::move(w.buf), peer, BCNET_CHANNEL_EVENT, true);
     }
 }
 

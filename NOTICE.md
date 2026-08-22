@@ -31,6 +31,14 @@ The release bundles include **BanjoRecompiled**, unmodified, alongside BanjoCoop
 - Licence: GPL-3.0 — full text in `third_party/BanjoRecompiled/COPYING`
 - Version bundled: see `BUNDLED_VERSION` in the archive's `README.txt`
 
+Every release archive (bundle or mod-only) also includes **cloudflared**, Cloudflare's tunnel
+client, unmodified, next to the native library. It is what lets the Cloudflare Tunnel connection
+mode work with no port forwarding and no separate install; Direct (UDP) play does not use it.
+
+- Upstream: <https://github.com/cloudflare/cloudflared>
+- Licence: Apache-2.0
+- Version bundled: pinned in `scripts/versions.sh` (`CLOUDFLARED_VERSION`)
+
 GPL-3 §6 requires that the corresponding source accompany a binary or be offered alongside it.
 That obligation is discharged here by pointing at the upstream repository, from which both the
 release binaries and their exact corresponding source are available. The bundled binary is
@@ -58,8 +66,15 @@ BanjoCoop stands on other people's work:
 - **[Banjo-Kazooie decompilation](https://gitlab.com/banjo.decomp/banjo-kazooie)** — the reverse
   engineering that makes it possible to know what any of these functions do. Every attachment
   point in `docs/symbols.md` was found by reading their work.
-- **[ENet](https://github.com/lsalzman/enet)** by Lee Salzman — the reliable-UDP transport.
-  MIT-style licence; full text in `vendor/enet/LICENSE`.
+- **[ENet](https://github.com/lsalzman/enet)** by Lee Salzman — the reliable-UDP transport for
+  Direct play. MIT-style licence; full text in `vendor/enet/LICENSE`.
+- **[IXWebSocket](https://github.com/machinezone/IXWebSocket)** — the WebSocket client and server
+  behind the Cloudflare Tunnel transport. BSD-3-Clause; text in `vendor/IXWebSocket/LICENSE.txt`.
+- **[Mbed TLS](https://github.com/Mbed-TLS/mbedtls)** — the vendored TLS backend that lets the
+  tunnel client verify Cloudflare's certificate. Dual Apache-2.0 OR GPL-2.0-or-later (used here
+  under Apache-2.0); text in `vendor/mbedtls/LICENSE`.
+- **[cURL CA bundle](https://curl.se/docs/caextract.html)** — Mozilla's trusted CA roots, embedded
+  in the transport (`src/native/certs/cacert.pem`) to verify tunnel connections. MPL-2.0.
 - **[SM64CoopDX](https://github.com/coop-deluxe/sm64coopdx)** — not used as code, but its design
   is the reference this project measured itself against throughout: ownership by lowest player id,
   distance-based send rates, and the idea that a co-op mod should be a platform others can build

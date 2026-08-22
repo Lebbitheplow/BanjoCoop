@@ -4,7 +4,7 @@
 
 [manifest]
 id = "banjocoop"
-version = "0.1.1"
+version = "0.2.0"
 display_name = "BanjoCoop"
 description = """
 Online multiplayer for Banjo-Kazooie.
@@ -28,6 +28,9 @@ native_libraries = [
         "bcnet_init",
         "bcnet_host",
         "bcnet_join",
+        "bcnet_host_tunnel",
+        "bcnet_get_join_code",
+        "bcnet_join_tunnel",
         "bcnet_shutdown",
         "bcnet_pump",
         "bcnet_status",
@@ -48,9 +51,17 @@ options = [ "Offline", "Host", "Join" ]
 default = "Offline"
 
 [[manifest.config_options]]
+id = "connection"
+name = "Connection"
+description = "Direct needs the host to forward a UDP port (or both use a VPN). Cloudflare Tunnel needs neither: the host gets a join code to share, and joiners paste it into Host Address. Best latency is Direct; Cloudflare trades some for reaching hosts behind any router."
+type = "Enum"
+options = [ "Direct (UDP)", "Cloudflare Tunnel" ]
+default = "Direct (UDP)"
+
+[[manifest.config_options]]
 id = "address"
 name = "Host Address"
-description = "Address to connect to when Network Mode is Join."
+description = "When joining: a Direct host's IP address, or a Cloudflare Tunnel join code pasted from the host."
 type = "String"
 default = "127.0.0.1"
 

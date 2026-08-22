@@ -74,6 +74,10 @@ side** — into:
 The runtime loads the native library from *next to* the `.nrm`, not from inside it, so leaving it
 behind means the mod loads and then fails to find its networking.
 
+For the **Cloudflare Tunnel** connection mode, also drop the bundled `cloudflared` (`.exe` on
+Windows) into the same folder — the release archives include it, and the host launches it from
+beside the library. Direct (UDP) play does not need it.
+
 macOS is not currently built or tested. The transport is portable, so it is likely a matter of
 building it — but nobody has.
 
@@ -109,8 +113,19 @@ disk and comes back when they disconnect and reload it.
 | **D-pad Up** | Chat |
 | **Z** (next to another player) | Pick them up / put them down |
 
-Default port is **34567/UDP**. The host forwards it, or you both use a VPN/tunnel — there is no
-matchmaking server, by design.
+Two ways to connect, set by the **Connection** setting:
+
+- **Direct (UDP)** — default, lowest latency. The host forwards **34567/UDP**, or you both use a
+  VPN. Fast ENet-over-UDP; the connection is the host's IP address.
+- **Cloudflare Tunnel** — no port forwarding and nothing for joiners to install. The host runs a
+  bundled `cloudflared` that produces a **join code**; share it, and joiners set Connection to
+  Cloudflare Tunnel and paste the code into **Host Address**. It rides a WebSocket over Cloudflare's
+  network (which plain UDP cannot), so it trades a little latency for reaching a host behind any
+  router. The code is shown in the in-game lobby (host, then read it off) and in the log.
+
+There is no matchmaking server either way, by design. The free quick tunnel's URL changes each time
+the host restarts and is best-effort (no uptime guarantee); it is ideal for a session, not a
+standing server.
 
 ### Settings
 
@@ -119,8 +134,9 @@ All configurable from BanjoRecompiled's mod menu, live, without restarting.
 | Setting | Default | What it does |
 |---|---|---|
 | Network Mode | Offline | Host a session, join one, or stay offline |
-| Host Address | 127.0.0.1 | Address to connect to when joining |
-| Port | 34567 | UDP port to host on or connect to |
+| Connection | Direct (UDP) | Direct needs a forwarded port or a VPN; Cloudflare Tunnel needs neither |
+| Host Address | 127.0.0.1 | When joining: a Direct host's IP, or a Cloudflare Tunnel join code |
+| Port | 34567 | UDP port to host on or connect to (Direct); the local port cloudflared fronts (Tunnel) |
 | Player Name | player | Name shown to other players |
 | Show Player List | On | Overlay listing everyone and which world they are in |
 | Sync Enemies | On | Share enemies, so you can gang up and see each other's kills |
@@ -156,6 +172,14 @@ split is the central design decision of the whole project:
 Everything expensive happens on the transport's own thread. The game thread crosses the
 native boundary exactly **once per frame**, exchanging two staging structs, rather than once per
 object.
+
+The byte transport sits behind a small `Link` interface (`link.hpp`), so the same handshake,
+relay and adjudication logic drives two backends: **`EnetLink`** (UDP, for Direct play) and
+**`WsLink`** (a WebSocket, for the Cloudflare Tunnel mode). The WebSocket rides where UDP cannot —
+through a `cloudflared` quick tunnel the host launches (`tunnel.cpp`) — at the cost of collapsing
+the unreliable channel into reliable-ordered, so Direct stays the lower-latency choice. TLS for the
+`wss://` client uses a vendored mbedTLS and a CA bundle compiled into the library, so it verifies
+Cloudflare's certificate with no dependency on a system trust store.
 
 Peers compare protocol version, mod version and a build fingerprint at handshake, and are rejected
 with a named reason rather than left to desync mysteriously later.

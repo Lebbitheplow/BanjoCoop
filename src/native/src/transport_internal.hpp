@@ -9,14 +9,14 @@
 #ifndef BANJOCOOP_TRANSPORT_INTERNAL_HPP
 #define BANJOCOOP_TRANSPORT_INTERNAL_HPP
 
-#include <enet/enet.h>
-
 #include <cstring>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "banjocoop/byteorder.hpp"
+#include "banjocoop/link.hpp"
 #include "banjocoop/transport.hpp"
 
 namespace bcnet {
@@ -103,10 +103,12 @@ inline uint64_t note_key(uint32_t map_id, uint32_t note_index) {
 }
 
 struct Transport::Impl {
-    ENetHost* host = nullptr;
-    ENetPeer* server_peer = nullptr; /* client side only */
-    /* Host side: peer -> player id. Player ids are stable for a session; the host is always 0. */
-    std::unordered_map<ENetPeer*, uint32_t> peer_ids;
+    /* The active byte transport (EnetLink or WsLink). Owned here; created by host()/join() and
+     * torn down by shutdown(). Null while offline. */
+    std::unique_ptr<Link> link;
+    /* Host side: link peer handle -> player id. Player ids are stable for a session; the host is
+     * always 0. */
+    std::unordered_map<uint32_t, uint32_t> peer_ids;
     uint32_t next_player_id = 1;
 };
 

@@ -19,6 +19,27 @@ banjorecomp_asset_url() {
     echo "https://github.com/${BANJORECOMP_REPO}/releases/download/${BANJORECOMP_VERSION}/$1"
 }
 
+# cloudflared, bundled next to the native library so a host can open a Cloudflare tunnel with no
+# port forwarding and no separate install. Pinned for the same reason as the runtime above: a
+# bundle should ship a known-good tunnel client, not whatever "latest" happens to be that day.
+CLOUDFLARED_VERSION="2025.2.0"
+CLOUDFLARED_REPO="cloudflare/cloudflared"
+
+# Asset name for an OS/arch, as published on the cloudflared releases page.
+#   cloudflared_asset <linux|windows> [arch]
+cloudflared_asset() {
+    case "$1" in
+        linux)   echo "cloudflared-linux-${2:-amd64}" ;;
+        windows) echo "cloudflared-windows-${2:-amd64}.exe" ;;
+        macos)   echo "cloudflared-darwin-${2:-amd64}.tgz" ;;
+        *) return 1 ;;
+    esac
+}
+
+cloudflared_asset_url() {
+    echo "https://github.com/${CLOUDFLARED_REPO}/releases/download/${CLOUDFLARED_VERSION}/$1"
+}
+
 # Unpack an upstream release archive into a directory, whatever shape it happens to be.
 #
 #   banjorecomp_unpack <archive.zip> <destdir>

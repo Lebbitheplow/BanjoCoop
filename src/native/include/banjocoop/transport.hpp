@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -28,6 +29,8 @@
 #include "banjocoop/protocol.h"
 
 namespace bcnet {
+
+class Link; /* the byte transport; defined in link.hpp, forward-declared to keep this header light */
 
 constexpr size_t ROM_HASH_LEN = 20; /* sha1 */
 
@@ -75,6 +78,11 @@ public:
 
     bool host(uint16_t port, const Identity& id, std::string& error);
     bool join(const std::string& address, uint16_t port, const Identity& id, std::string& error);
+    /* WebSocket variants, for play over a Cloudflare tunnel. host_ws binds a local ws:// server a
+     * tunnel points at; join_ws connects to a full ws:// or wss:// URL from an expanded join code.
+     * Everything above the byte transport is identical to the ENet paths. */
+    bool host_ws(uint16_t port, const Identity& id, std::string& error);
+    bool join_ws(const std::string& url, const Identity& id, std::string& error);
     void shutdown();
 
     /* Called from the game thread once per frame. `state` is raw big-endian bytes from rdram. */
@@ -130,6 +138,11 @@ public:
     static constexpr uint32_t kStateHz = 30;
 
 private:
+    /* Stand the session up once the Link is bound. Shared by the ENet and WebSocket entry points,
+     * which differ only in which Link they create. */
+    bool start_host(std::unique_ptr<Link> link, const Identity& id);
+    bool start_join(std::unique_ptr<Link> link, const Identity& id);
+
     void run();                 /* net thread entry */
     void service_host();
     void service_client();

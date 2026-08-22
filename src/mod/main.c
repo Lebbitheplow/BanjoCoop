@@ -19,7 +19,7 @@
 #include "banjocoop/protocol.h"
 
 /* Bumped on any change that makes builds incompatible with each other. */
-#define BANJOCOOP_MOD_VERSION 26u
+#define BANJOCOOP_MOD_VERSION 27u
 
 /* Defined in the decomp but absent from functions.h, so declared here.
  *   player_getYaw  -> src/core2/playerutils.c
@@ -37,6 +37,11 @@ extern AnimCtrl *player_getAnimCtrlPtr(void);
 RECOMP_IMPORT(".", u32 bcnet_init(u32 mod_version, const char *name, const u8 *rom_hash));
 RECOMP_IMPORT(".", u32 bcnet_host(u32 port));
 RECOMP_IMPORT(".", u32 bcnet_join(const char *address, u32 port));
+/* Cloudflare tunnel variants: host over a bundled cloudflared tunnel, poll for the generated join
+ * code, and join by that code. See src/native/src/tunnel.cpp. */
+RECOMP_IMPORT(".", u32 bcnet_host_tunnel(u32 port));
+RECOMP_IMPORT(".", u32 bcnet_get_join_code(char *out, u32 max));
+RECOMP_IMPORT(".", u32 bcnet_join_tunnel(const char *code));
 RECOMP_IMPORT(".", void bcnet_shutdown(void));
 RECOMP_IMPORT(".", void bcnet_pump(bc_player_state *local, bc_outgoing *outgoing, bc_incoming *incoming));
 RECOMP_IMPORT(".", u32 bcnet_status(void));
@@ -57,6 +62,14 @@ RECOMP_IMPORT(".", u32 bcnet_take_host_save(char *out, u32 max));
 #define NETMODE_HOST 1
 #define NETMODE_JOIN 2
 
+/* Mirrors the "connection" config enum. */
+#define CONNECTION_DIRECT 0
+#define CONNECTION_TUNNEL 1
+
+/* Longest join code we will read back from the tunnel (a trycloudflare hostname is well under
+ * this; a named-tunnel host has room too). */
+#define JOIN_CODE_MAX 128u
+
 /* Staging buffers. Static so their addresses are stable for the whole session — the native side
  * receives them as MIPS pointers each frame and translates through TO_PTR. */
 static bc_player_state g_local;
@@ -65,6 +78,9 @@ static bc_incoming g_incoming;
 static u32 g_initialised = 0;
 static u32 g_last_status = 0xFFFFFFFF;
 static u32 g_frame = 0;
+
+/* Set once the tunnel join code has been logged, so it is announced exactly once per host session. */
+static u32 g_join_code_logged = 0;
 
 /* So turning enemy sync off mid-session drops what it had learned, rather than leaving stale
  * per-map enemy ids around. */
@@ -146,17 +162,44 @@ static void banjocoop_start(void) {
 
     u32 mode = recomp_get_config_u32("netmode");
     u32 port = (u32)recomp_get_config_double("port");
+    u32 connection = recomp_get_config_u32("connection");
+
+    g_join_code_logged = 0;
 
     if (mode == NETMODE_HOST) {
-        recomp_printf("[banjocoop] hosting on port %u\n", port);
-        bcnet_host(port);
+        if (connection == CONNECTION_TUNNEL) {
+            recomp_printf("[banjocoop] hosting over Cloudflare tunnel (local port %u)\n", port);
+            bcnet_host_tunnel(port);
+        } else {
+            recomp_printf("[banjocoop] hosting on port %u\n", port);
+            bcnet_host(port);
+        }
     } else if (mode == NETMODE_JOIN) {
         char *address = recomp_get_config_string("address");
         if (address != NULL) {
-            recomp_printf("[banjocoop] joining %s:%u\n", address, port);
-            bcnet_join(address, port);
+            if (connection == CONNECTION_TUNNEL) {
+                recomp_printf("[banjocoop] joining tunnel '%s'\n", address);
+                bcnet_join_tunnel(address);
+            } else {
+                recomp_printf("[banjocoop] joining %s:%u\n", address, port);
+                bcnet_join(address, port);
+            }
             recomp_free_config_string(address);
         }
+    }
+}
+
+/* Once cloudflared has minted the tunnel URL, surface it in the log so a host using the config
+ * menu (rather than the in-game lobby) can read off the code to share. Polled because the URL
+ * arrives a few seconds after hosting starts. */
+static void poll_join_code(void) {
+    if (g_join_code_logged) {
+        return;
+    }
+    char code[JOIN_CODE_MAX];
+    if (bcnet_get_join_code(code, JOIN_CODE_MAX) != 0) {
+        g_join_code_logged = 1;
+        recomp_printf("[banjocoop] tunnel join code (share this): %s\n", code);
     }
 }
 
@@ -254,6 +297,7 @@ RECOMP_HOOK("baphysics_update") void banjocoop_frame(void) {
     bcnet_pump(&g_local, world_outgoing(), &g_incoming);
 
     report_status_change();
+    poll_join_code();
 
     /* Spawn/update/despawn the remote-player puppets. */
     if (g_incoming.connected) {

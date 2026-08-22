@@ -22,8 +22,8 @@ BUNDLE=0
 [ "${2:-}" = "--bundle" ] && BUNDLE=1
 
 case "$OS" in
-    linux)   LIB_NAME="banjocoop_net.so";  ASSET="$BANJORECOMP_ASSET_LINUX";   EXE="BanjoRecompiled" ;;
-    windows) LIB_NAME="banjocoop_net.dll"; ASSET="$BANJORECOMP_ASSET_WINDOWS"; EXE="BanjoRecompiled.exe" ;;
+    linux)   LIB_NAME="banjocoop_net.so";  ASSET="$BANJORECOMP_ASSET_LINUX";   EXE="BanjoRecompiled";     CF_NAME="cloudflared" ;;
+    windows) LIB_NAME="banjocoop_net.dll"; ASSET="$BANJORECOMP_ASSET_WINDOWS"; EXE="BanjoRecompiled.exe"; CF_NAME="cloudflared.exe" ;;
     *) echo "usage: $0 <linux|windows> [--bundle]" >&2; exit 2 ;;
 esac
 
@@ -48,6 +48,14 @@ cp build/banjocoop.nrm "$STAGE/"
 cp "$LIB" "$STAGE/"
 cp NOTICE.md LICENSE "$STAGE/"
 cp scripts/versions.sh "$STAGE/"
+
+# cloudflared, next to the native library so a Cloudflare-tunnel host finds it beside itself. The
+# transport also falls back to a cloudflared on PATH, so this is what makes tunnels work with none.
+CF_ASSET="$(cloudflared_asset "$OS")"
+echo "    fetching $CF_ASSET ($CLOUDFLARED_VERSION)"
+if command -v curl >/dev/null; then curl -fL --progress-bar -o "$STAGE/$CF_NAME" "$(cloudflared_asset_url "$CF_ASSET")"
+else wget -q -O "$STAGE/$CF_NAME" "$(cloudflared_asset_url "$CF_ASSET")"; fi
+chmod +x "$STAGE/$CF_NAME" 2>/dev/null || true
 if [ "$OS" = "windows" ]; then cp scripts/install.ps1 "$STAGE/"; else cp scripts/install.sh "$STAGE/"; fi
 cp scripts/check_rom.py "$STAGE/"
 chmod +x "$STAGE/install.sh" 2>/dev/null || true
@@ -101,7 +109,12 @@ fi
     echo "  2. Run BanjoRecompiled and point it at your ROM."
     echo "  3. Mod menu -> enable BanjoCoop -> set Network Mode to Host or Join."
     echo
-    echo "  Default port is 34567/UDP. The host needs it reachable."
+    echo "CONNECTION"
+    echo "  Direct (UDP): default. The host forwards port 34567/UDP, or both use a VPN."
+    echo "  Cloudflare Tunnel: no port forwarding. The host gets a join code (shown in"
+    echo "    the in-game lobby, D-pad Down, and in the log) to share; joiners set"
+    echo "    Connection to Cloudflare Tunnel and paste the code into Host Address."
+    echo "    Uses the bundled cloudflared; joiners install nothing extra."
     echo
     echo "ROM REJECTED?"
     if [ "$OS" = "windows" ]; then

@@ -158,9 +158,18 @@ mkdir -p "$MODS_DIR"
 cp "$NRM" "$MODS_DIR/"
 cp "$LIB" "$MODS_DIR/"
 
+# cloudflared, if it shipped in this archive, goes beside the library so the Cloudflare-tunnel
+# connection mode finds it. Optional: Direct (UDP) play does not need it.
+CF="$(find_file cloudflared || true)"
+if [ -n "$CF" ]; then
+    cp "$CF" "$MODS_DIR/"
+    chmod +x "$MODS_DIR/cloudflared" 2>/dev/null || true
+fi
+
 bold "BanjoCoop installed"
 echo "  $MODS_DIR/banjocoop.nrm"
 echo "  $MODS_DIR/banjocoop_net.so"
+[ -n "$CF" ] && echo "  $MODS_DIR/cloudflared  (for the Cloudflare Tunnel connection mode)"
 cat <<EOF
 
 next:

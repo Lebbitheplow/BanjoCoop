@@ -144,6 +144,9 @@ void Transport::run() {
         }
 
         pump_sim();
+        /* Push everything queued this iteration out now rather than waiting for the next
+         * service(), keeping a frame of latency off reliable world events. */
+        impl_->link->flush();
     }
 }
 
@@ -155,22 +158,9 @@ void Transport::pump_sim() {
     }
 
     for (PendingPacket& pkt : due) {
-        ENetPacket* ep = enet_packet_create(
-            pkt.data.data(), pkt.data.size(),
-            pkt.reliable ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED);
-        if (ep == nullptr) {
-            continue;
-        }
-        if (pkt.target == kBroadcast) {
-            enet_host_broadcast(impl_->host, pkt.channel, ep);
-        } else {
-            ENetPeer* peer = &impl_->host->peers[pkt.target];
-            if (peer->state == ENET_PEER_STATE_CONNECTED) {
-                enet_peer_send(peer, pkt.channel, ep);
-            } else {
-                enet_packet_destroy(ep);
-            }
-        }
+        /* kBroadcast and the link's kLinkBroadcast are the same value, so the target passes
+         * through untranslated. A stale handle is dropped by the link, not checked here. */
+        impl_->link->send(pkt.target, pkt.channel, pkt.reliable, pkt.data.data(), pkt.data.size());
     }
 }
 
@@ -197,15 +187,16 @@ void Transport::broadcast_state() {
 }
 
 void Transport::service_host() {
-    ENetEvent ev;
-    while (enet_host_service(impl_->host, &ev, 1) > 0) {
+    std::vector<LinkEvent> events;
+    impl_->link->service(1, events);
+    for (LinkEvent& ev : events) {
         switch (ev.type) {
-            case ENET_EVENT_TYPE_CONNECT:
+            case LinkEvent::Type::Connect:
                 /* Nothing yet — a peer is only admitted once its HELLO validates. */
                 break;
 
-            case ENET_EVENT_TYPE_RECEIVE: {
-                Reader r(ev.packet->data, ev.packet->dataLength);
+            case LinkEvent::Type::Receive: {
+                Reader r(ev.data.data(), ev.data.size());
                 uint8_t type = r.type();
 
                 if (type == BCNET_MSG_HELLO) {
@@ -227,12 +218,13 @@ void Transport::service_host() {
                     }
 
                     if (reject != 0) {
+                        /* Sent directly, not through the sim: a handshake must not be delayed, and
+                         * flush() guarantees the reject reaches the peer before we drop it. */
                         Writer w(BCNET_MSG_REJECT);
                         w.u32(reject);
-                        ENetPacket* p = enet_packet_create(w.buf.data(), w.buf.size(), ENET_PACKET_FLAG_RELIABLE);
-                        enet_peer_send(ev.peer, BCNET_CHANNEL_EVENT, p);
-                        enet_host_flush(impl_->host);
-                        enet_peer_disconnect_later(ev.peer, reject);
+                        impl_->link->send(ev.peer, BCNET_CHANNEL_EVENT, true, w.buf.data(), w.buf.size());
+                        impl_->link->flush();
+                        impl_->link->disconnect(ev.peer);
                         break;
                     }
 
@@ -247,13 +239,12 @@ void Transport::service_host() {
 
                     Writer w(BCNET_MSG_WELCOME);
                     w.u32(pid);
-                    ENetPacket* p = enet_packet_create(w.buf.data(), w.buf.size(), ENET_PACKET_FLAG_RELIABLE);
-                    enet_peer_send(ev.peer, BCNET_CHANNEL_EVENT, p);
+                    impl_->link->send(ev.peer, BCNET_CHANNEL_EVENT, true, w.buf.data(), w.buf.size());
 
                     /* Straight after admitting them: the host's save is the session's save, and
                      * everything a client cannot otherwise learn — notes in maps nobody has
                      * visited yet, above all — is in it. */
-                    send_save_file_to(static_cast<uint32_t>(ev.peer - impl_->host->peers));
+                    send_save_file_to(ev.peer);
                     broadcast_roster();
                 } else if (type == BCNET_MSG_STATE) {
                     uint32_t pid = r.u32();
@@ -285,13 +276,11 @@ void Transport::service_host() {
                             write_state(w, state);
                             std::lock_guard<std::mutex> lock(sim_mutex_);
                             for (auto& [peer, other_id] : impl_->peer_ids) {
-                                if (peer == ev.peer || peer->state != ENET_PEER_STATE_CONNECTED) {
+                                if (peer == ev.peer) {
                                     continue;
                                 }
                                 std::vector<uint8_t> copy = w.buf;
-                                sim_.submit(std::move(copy),
-                                            static_cast<uint32_t>(peer - impl_->host->peers),
-                                            BCNET_CHANNEL_STATE, false);
+                                sim_.submit(std::move(copy), peer, BCNET_CHANNEL_STATE, false);
                             }
                         }
                     }
@@ -304,7 +293,7 @@ void Transport::service_host() {
                      * Relayed verbatim, including the sender's sequence number, so the receiver
                      * can still discard a frame that overtakes a newer one. Only peers in the map
                      * it describes are interested. */
-                    Reader peek(ev.packet->data, ev.packet->dataLength);
+                    Reader peek(ev.data.data(), ev.data.size());
                     peek.type();
                     uint32_t seq = peek.u32();
                     uint32_t frame_map = peek.u32();
@@ -324,14 +313,8 @@ void Transport::service_host() {
                             if (peer == ev.peer || id >= BCNET_MAX_PLAYERS || !wants[id]) {
                                 continue;
                             }
-                            if (peer->state != ENET_PEER_STATE_CONNECTED) {
-                                continue;
-                            }
-                            std::vector<uint8_t> copy(ev.packet->data,
-                                                      ev.packet->data + ev.packet->dataLength);
-                            sim_.submit(std::move(copy),
-                                        static_cast<uint32_t>(peer - impl_->host->peers),
-                                        BCNET_CHANNEL_STATE, false);
+                            std::vector<uint8_t> copy = ev.data;
+                            sim_.submit(std::move(copy), peer, BCNET_CHANNEL_STATE, false);
                         }
                     }
                 } else if (type == BCNET_MSG_CHAT) {
@@ -347,7 +330,7 @@ void Transport::service_host() {
                         accept_chat(sender->second, line);
                         std::lock_guard<std::mutex> lock(sim_mutex_);
                         for (const auto& [peer, id] : impl_->peer_ids) {
-                            if (peer == ev.peer || peer->state != ENET_PEER_STATE_CONNECTED) {
+                            if (peer == ev.peer) {
                                 continue;
                             }
                             Writer relay(BCNET_MSG_CHAT);
@@ -356,9 +339,7 @@ void Transport::service_host() {
                             for (uint32_t i = 0; i < BCNET_CHAT_LEN / 4; i++) {
                                 relay.u32(line.text[i]);
                             }
-                            sim_.submit(std::move(relay.buf),
-                                        static_cast<uint32_t>(peer - impl_->host->peers),
-                                        BCNET_CHANNEL_EVENT, true);
+                            sim_.submit(std::move(relay.buf), peer, BCNET_CHANNEL_EVENT, true);
                         }
                     }
                 } else if (type == BCNET_MSG_EVENT) {
@@ -371,11 +352,10 @@ void Transport::service_host() {
                         adjudicate(world, it->second);
                     }
                 }
-                enet_packet_destroy(ev.packet);
                 break;
             }
 
-            case ENET_EVENT_TYPE_DISCONNECT: {
+            case LinkEvent::Type::Disconnect: {
                 auto it = impl_->peer_ids.find(ev.peer);
                 if (it != impl_->peer_ids.end()) {
                     {
@@ -398,22 +378,24 @@ void Transport::service_host() {
 }
 
 void Transport::service_client() {
-    ENetEvent ev;
-    while (enet_host_service(impl_->host, &ev, 1) > 0) {
+    std::vector<LinkEvent> events;
+    impl_->link->service(1, events);
+    for (LinkEvent& ev : events) {
         switch (ev.type) {
-            case ENET_EVENT_TYPE_CONNECT: {
+            case LinkEvent::Type::Connect: {
                 Writer w(BCNET_MSG_HELLO);
                 w.u32(BCNET_PROTOCOL_VERSION);
                 w.u32(identity_.mod_version);
                 w.bytes(identity_.rom_hash.data(), identity_.rom_hash.size());
                 w.name(identity_.name);
-                ENetPacket* p = enet_packet_create(w.buf.data(), w.buf.size(), ENET_PACKET_FLAG_RELIABLE);
-                enet_peer_send(ev.peer, BCNET_CHANNEL_EVENT, p);
+                /* Sent directly, not through the sim: the handshake must not be delayed. */
+                impl_->link->send(ev.peer, BCNET_CHANNEL_EVENT, true, w.buf.data(), w.buf.size());
+                impl_->link->flush();
                 break;
             }
 
-            case ENET_EVENT_TYPE_RECEIVE: {
-                Reader r(ev.packet->data, ev.packet->dataLength);
+            case LinkEvent::Type::Receive: {
+                Reader r(ev.data.data(), ev.data.size());
                 uint8_t type = r.type();
 
                 if (type == BCNET_MSG_WELCOME) {
@@ -530,11 +512,10 @@ void Transport::service_client() {
                         accept_progress(prog);
                     }
                 }
-                enet_packet_destroy(ev.packet);
                 break;
             }
 
-            case ENET_EVENT_TYPE_DISCONNECT:
+            case LinkEvent::Type::Disconnect:
                 if (status_.load() != Status::Rejected) {
                     status_.store(Status::Failed);
                 }
@@ -549,9 +530,7 @@ void Transport::service_client() {
         }
     }
 
-    if (impl_->server_peer != nullptr) {
-        ping_ms_.store(impl_->server_peer->roundTripTime);
-    }
+    ping_ms_.store(impl_->link->ping_ms());
 }
 
 } // namespace bcnet

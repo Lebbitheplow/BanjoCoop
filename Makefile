@@ -196,6 +196,7 @@ debug-p2: install-p2
 check-exports: native
 	@missing=0; \
 	for sym in recomp_api_version bcnet_init bcnet_host bcnet_join bcnet_shutdown bcnet_pump \
+	           bcnet_host_tunnel bcnet_get_join_code bcnet_join_tunnel \
 	           bcnet_status bcnet_reject_reason bcnet_set_sim bcnet_set_save_path \
 	           bcnet_take_host_save bcnet_player_name; do \
 		if nm -D --defined-only $(NATIVE_LIB) 2>/dev/null | grep -qE " $$sym$$"; then \

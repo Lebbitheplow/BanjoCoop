@@ -53,6 +53,7 @@ jobs:
           $required = @(
             'recomp_api_version',
             'bcnet_init','bcnet_host','bcnet_join','bcnet_shutdown','bcnet_pump',
+            'bcnet_host_tunnel','bcnet_get_join_code','bcnet_join_tunnel',
             'bcnet_status','bcnet_reject_reason','bcnet_set_sim','bcnet_set_save_path',
             'bcnet_take_host_save','bcnet_player_name'
           )

@@ -24,6 +24,7 @@
 
 #include "banjocoop/protocol.h"
 #include "banjocoop/transport.hpp"
+#include "banjocoop/tunnel.hpp"
 
 using namespace bcnet;
 
@@ -32,6 +33,9 @@ namespace {
 /* The runtime refuses to load a native library that does not declare a supported ABI version.
  * Without this the library loads but every export silently fails to resolve. */
 std::unique_ptr<Transport> g_transport;
+
+/* The host's cloudflared quick tunnel, live only while hosting over a tunnel. */
+std::unique_ptr<TunnelProcess> g_tunnel;
 
 /* Captured by bcnet_init and reused for every subsequent host()/join(), so the mod does not have
  * to re-marshal the ROM hash and name across the boundary each time. */
@@ -42,6 +46,30 @@ Transport& transport() {
         g_transport = std::make_unique<Transport>();
     }
     return *g_transport;
+}
+
+TunnelProcess& tunnel() {
+    if (!g_tunnel) {
+        g_tunnel = std::make_unique<TunnelProcess>();
+    }
+    return *g_tunnel;
+}
+
+/* Turn a join code into a wss:// URL. The code is a hostname (brave-tiger.trycloudflare.com, or a
+ * named tunnel's own host); a user who pasted a full URL still works, since any scheme prefix is
+ * stripped and replaced with wss://. */
+std::string join_url_from_code(std::string code) {
+    for (const char* prefix : {"wss://", "ws://", "https://", "http://"}) {
+        size_t n = std::strlen(prefix);
+        if (code.compare(0, n, prefix) == 0) {
+            code.erase(0, n);
+            break;
+        }
+    }
+    while (!code.empty() && (code.back() == '/' || code.back() == ' ')) {
+        code.pop_back();
+    }
+    return "wss://" + code;
 }
 
 /* Read a fixed-length, NUL-terminated string out of rdram.
@@ -162,10 +190,86 @@ BCNET_ABI void bcnet_join(uint8_t* rdram, recomp_context* ctx) {
     _return<uint32_t>(ctx, ok ? 1u : 0u);
 }
 
+/* bcnet_host_tunnel(u32 port) -> u32 ok
+ *
+ * Host over a Cloudflare tunnel: bind a local ws:// server on `port`, then launch cloudflared
+ * pointed at it. Clients need no port forwarding — they reach it over wss:// with the generated
+ * join code, which the mod polls for with bcnet_get_join_code. */
+BCNET_ABI void bcnet_host_tunnel(uint8_t* rdram, recomp_context* ctx) {
+    uint32_t port = _arg<0, uint32_t>(rdram, ctx);
+    std::string err;
+    if (!transport().host_ws(static_cast<uint16_t>(port), g_identity, err)) {
+        std::printf("[banjocoop] tunnel host failed (ws server): %s\n", err.c_str());
+        std::fflush(stdout);
+        _return<uint32_t>(ctx, 0);
+        return;
+    }
+    if (!tunnel().start(static_cast<uint16_t>(port), err)) {
+        std::printf("[banjocoop] tunnel host failed (cloudflared): %s\n", err.c_str());
+        std::fflush(stdout);
+        transport().shutdown();
+        _return<uint32_t>(ctx, 0);
+        return;
+    }
+    std::printf("[banjocoop] hosting over tunnel; waiting for cloudflared to report the join code\n");
+    std::fflush(stdout);
+    _return<uint32_t>(ctx, 1);
+}
+
+/* bcnet_get_join_code(PTR(char) out, u32 max) -> u32 length
+ *
+ * 0 until cloudflared has reported the tunnel URL. Written a byte at a time, like the other
+ * string-returning exports, because rdram's word-swapped layout makes a struct copy wrong. */
+BCNET_ABI void bcnet_get_join_code(uint8_t* rdram, recomp_context* ctx) {
+    PTR(char) out_ptr = _arg<0, PTR(char)>(rdram, ctx);
+    uint32_t max = _arg<1, uint32_t>(rdram, ctx);
+
+    std::string code = g_tunnel ? g_tunnel->join_host() : std::string{};
+    if (code.empty() || out_ptr == 0 || max == 0) {
+        _return<uint32_t>(ctx, 0);
+        return;
+    }
+    uint32_t n = static_cast<uint32_t>(code.size());
+    if (n >= max) {
+        n = max - 1;
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        MEM_B(i, static_cast<gpr>(out_ptr)) = code[i];
+    }
+    MEM_B(n, static_cast<gpr>(out_ptr)) = '\0';
+    _return<uint32_t>(ctx, n);
+}
+
+/* bcnet_join_tunnel(PTR(char) code) -> u32 ok
+ *
+ * Join a tunnelled host: the code is a hostname that becomes a wss:// URL. Certificate verification
+ * uses the CA bundle compiled into the transport. */
+BCNET_ABI void bcnet_join_tunnel(uint8_t* rdram, recomp_context* ctx) {
+    PTR(char) code_ptr = _arg<0, PTR(char)>(rdram, ctx);
+    std::string code = read_mips_string(rdram, code_ptr, 256);
+    std::string url = join_url_from_code(code);
+
+    std::printf("[banjocoop] join: connecting to tunnel '%s'\n", url.c_str());
+    std::fflush(stdout);
+
+    std::string err;
+    bool ok = transport().join_ws(url, g_identity, err);
+    if (!ok) {
+        std::printf("[banjocoop] tunnel join failed: %s\n", err.c_str());
+    } else {
+        std::printf("[banjocoop] join: socket ready, handshaking\n");
+    }
+    std::fflush(stdout);
+    _return<uint32_t>(ctx, ok ? 1u : 0u);
+}
+
 /* bcnet_shutdown() */
 BCNET_ABI void bcnet_shutdown(uint8_t* rdram, recomp_context* ctx) {
     (void)rdram;
     (void)ctx;
+    if (g_tunnel) {
+        g_tunnel->stop();
+    }
     if (g_transport) {
         g_transport->shutdown();
     }

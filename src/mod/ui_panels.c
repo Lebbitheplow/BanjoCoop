@@ -23,6 +23,14 @@ extern int bakey_pressed(s32 button);
 RECOMP_IMPORT(".", u32 bcnet_player_name(u32 player_id, char *out, u32 max));
 RECOMP_IMPORT(".", u32 bcnet_host(u32 port));
 RECOMP_IMPORT(".", u32 bcnet_join(const char *address, u32 port));
+RECOMP_IMPORT(".", u32 bcnet_host_tunnel(u32 port));
+RECOMP_IMPORT(".", u32 bcnet_get_join_code(char *out, u32 max));
+RECOMP_IMPORT(".", u32 bcnet_join_tunnel(const char *code));
+
+/* Mirrors the "connection" config enum. */
+#define CONNECTION_DIRECT 0
+#define CONNECTION_TUNNEL 1
+#define JOIN_CODE_MAX 128u
 
 #define UI_CHAT_ROWS BCNET_CHAT_HISTORY
 #define UI_ROW_CHARS 64u
@@ -186,6 +194,10 @@ static RecompuiResource s_lobby_address = 0;
 static RecompuiResource s_lobby_status = 0;
 static u32 s_lobby_built = 0;
 static u32 s_lobby_open = 0;
+/* Set after a tunnel host is started: the lobby stays up (rather than closing on "connected", which
+ * a host is the moment it hosts) to show the join code as soon as cloudflared reports it. */
+static u32 s_showing_code = 0;
+static u32 s_code_shown = 0;
 
 
 static void build_lobby(void) {
@@ -203,7 +215,7 @@ static void build_lobby(void) {
 
     recompui_create_label(s_lobby_context, root, "BanjoCoop", LABELSTYLE_LARGE);
     s_lobby_status = recompui_create_label(s_lobby_context, root,
-                                           "Start pressed: host. Address below, then B to join.",
+                                           "Start: host. Paste an address/code below, then B to join.",
                                            LABELSTYLE_SMALL);
     s_lobby_address = recompui_create_textinput(s_lobby_context, root);
     recompui_set_input_text(s_lobby_address, "127.0.0.1");
@@ -213,17 +225,47 @@ static void build_lobby(void) {
     s_lobby_built = 1;
 }
 
+/* Close the lobby and hand the controller back to the game. */
+static void lobby_close(void) {
+    s_lobby_open = 0;
+    s_showing_code = 0;
+    s_code_shown = 0;
+    recompui_set_context_captures_input(s_lobby_context, 0);
+    recompui_hide_context(s_lobby_context);
+}
+
 static void lobby_update(bc_incoming *inc) {
     if (recomp_get_config_u32("show_lobby") == 0) {
+        return;
+    }
+
+    /* Code-display mode: after hosting over a tunnel, keep the lobby up to show the join code. This
+     * runs even though `inc->connected` is set (a host is "connected" the instant it hosts), which
+     * is exactly why it is handled before the auto-close below. */
+    if (s_showing_code) {
+        if (!s_code_shown) {
+            char code[JOIN_CODE_MAX];
+            if (bcnet_get_join_code(code, JOIN_CODE_MAX) != 0) {
+                /* No libc here, so the line is assembled with the mod's own string helper. */
+                char line[JOIN_CODE_MAX + 48];
+                u32 at = 0;
+                at = ui_str_put(line, at, "Join code (share it): ", sizeof(line));
+                at = ui_str_put(line, at, code, sizeof(line));
+                at = ui_str_put(line, at, "   -   Z to close", sizeof(line));
+                recompui_set_text(s_lobby_status, line);
+                s_code_shown = 1;
+            }
+        }
+        if (bakey_pressed(BUTTON_Z) || bakey_pressed(BUTTON_D_DOWN)) {
+            lobby_close();
+        }
         return;
     }
 
     /* Only while there is a choice to make. */
     if (inc->connected) {
         if (s_lobby_open) {
-            s_lobby_open = 0;
-            recompui_set_context_captures_input(s_lobby_context, 0);
-            recompui_hide_context(s_lobby_context);
+            lobby_close();
         }
         return;
     }
@@ -242,24 +284,35 @@ static void lobby_update(bc_incoming *inc) {
     }
 
     u32 port = (u32)recomp_get_config_double("port");
+    u32 connection = recomp_get_config_u32("connection");
 
     if (bakey_pressed(BUTTON_START)) {
+        if (connection == CONNECTION_TUNNEL) {
+            /* Stay open to show the code cloudflared is about to report. */
+            recompui_set_text(s_lobby_status, "starting Cloudflare tunnel...");
+            bcnet_host_tunnel(port);
+            s_showing_code = 1;
+            s_code_shown = 0;
+            return;
+        }
         recompui_set_text(s_lobby_status, "hosting...");
         bcnet_host(port);
     } else if (bakey_pressed(BUTTON_B)) {
         char *addr = recompui_get_input_text(s_lobby_address);
         if (addr != NULL) {
             recompui_set_text(s_lobby_status, "joining...");
-            bcnet_join(addr, port);
+            if (connection == CONNECTION_TUNNEL) {
+                bcnet_join_tunnel(addr);
+            } else {
+                bcnet_join(addr, port);
+            }
             recomp_free(addr);
         }
     } else if (!bakey_pressed(BUTTON_Z)) {
         return;
     }
 
-    s_lobby_open = 0;
-    recompui_set_context_captures_input(s_lobby_context, 0);
-    recompui_hide_context(s_lobby_context);
+    lobby_close();
 }
 
 
